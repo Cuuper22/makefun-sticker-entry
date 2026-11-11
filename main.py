@@ -1,4 +1,5 @@
-"""make.fun sticker: a crowned robot agent above the make.fun wordmark.
+"""make.fun sticker: the #1 agent. A winking robot in a crown marked 1, above a
+bold make.fun nameplate, inside one thick white die-cut with a heavy keyline.
 
 Pure standard library. Shapes are signed distance fields; coverage comes straight
 from the distance (analytic anti-aliasing), outlines and the die-cut border are
@@ -165,57 +166,6 @@ class Field:
                         d[k] = v
         self.d = d
 
-    @classmethod
-    def blend(cls, fields, k):
-        """Smooth union of whole fields (polynomial smooth-min, radius k): one
-        blend per group, so fillets form only where separate parts meet."""
-        self = cls.__new__(cls)
-        self.x0 = min(f.x0 for f in fields)
-        self.y0 = min(f.y0 for f in fields)
-        self.x1 = max(f.x1 for f in fields)
-        self.y1 = max(f.y1 for f in fields)
-        rw = self.rw = self.x1 - self.x0
-        big = 1e9
-        d = [big] * (rw * (self.y1 - self.y0))
-        for f in fields:
-            fd, frw = f.d, f.rw
-            for y in range(f.y0, f.y1):
-                src = (y - f.y0) * frw - f.x0
-                dst = (y - self.y0) * rw - self.x0
-                for x in range(f.x0, f.x1):
-                    v = fd[src + x]
-                    o = d[dst + x]
-                    h = k - abs(o - v)
-                    if h > 0:
-                        h /= k
-                        d[dst + x] = (o if o < v else v) - h * h * k * 0.25
-                    elif v < o:
-                        d[dst + x] = v
-        self.d = d
-        return self
-
-    def contour(self, level):
-        """Re-measure distance from the `level` iso-line: (d - level) / |grad d|.
-        A smooth union is not a true distance field (|grad| < 1 inside fillets),
-        so bands painted on it directly would swell; this keeps them even."""
-        d, rw = self.d, self.rw
-        h = self.y1 - self.y0
-        out = [1e9] * len(d)
-        for y in range(1, h - 1):
-            r = y * rw
-            for x in range(1, rw - 1):
-                k = r + x
-                v = d[k] - level
-                if v > 40 or v < -40:
-                    out[k] = v
-                    continue
-                gx = (d[k + 1] - d[k - 1]) * 0.5
-                gy = (d[k + rw] - d[k - rw]) * 0.5
-                g = math.sqrt(gx * gx + gy * gy)
-                out[k] = v / (g if g > 0.2 else 0.2)
-        self.d = out
-        return self
-
     def paint(self, cv, color, grow=0.0):
         cr, cg, cb = (c / 255.0 for c in color)
         d = self.d
@@ -348,26 +298,13 @@ def move(p, dx):
         p.cx += dx
 
 
-def star(cx, cy, s):
-    """Four-point sparkle of radius s with slightly rounded tips."""
-    pts = []
-    for i in range(8):
-        a = math.pi / 4 * i
-        rr = s if i % 2 == 0 else s * 0.3
-        pts.append((cx + rr * math.sin(a), cy - rr * math.cos(a)))
-    return Poly(pts, 3)
-
-
 # ---------------------------------------------------------------- the art
 INK = (22, 18, 48)
 WHITE = (255, 255, 255)
 VIOLET = (124, 92, 255)
-VIOLET_LIGHT = (184, 168, 255)
 SCREEN = (30, 26, 70)
-SCREEN_LIGHT = (66, 60, 130)
 MINT = (61, 245, 200)
 GOLD = (255, 194, 51)
-CORAL = (255, 84, 112)
 
 
 def main():
@@ -375,56 +312,68 @@ def main():
     os.makedirs(out_dir, exist_ok=True)
     cv = Canvas()
 
-    dy = 58  # vertical placement of the robot
-    head = [RBox(262, 250 + dy, 762, 610 + dy, 96)]
-    ears = [RBox(218, 360 + dy, 280, 500 + dy, 24), RBox(744, 360 + dy, 806, 500 + dy, 24)]
-    crown = [Poly([(360, 250 + dy), (360, 128 + dy), (440, 184 + dy), (512, 84 + dy),
-                   (584, 184 + dy), (664, 128 + dy), (664, 250 + dy)], 8)]
-    crown_balls = [Circle(360, 124 + dy, 22), Circle(512, 78 + dy, 26), Circle(664, 124 + dy, 22)]
-    # the "1" on the crown: this agent is ranked first
-    one = [Capsule(520, 150 + dy, 520, 214 + dy, 11), Capsule(520, 150 + dy, 496, 168 + dy, 11)]
-    screen = [RBox(316, 300 + dy, 708, 560 + dy, 64)]
-    eyes = [Arc(428, 440 + dy, 46, 20, 140, 18), Arc(596, 440 + dy, 46, 20, 140, 18)]
-    mouth = [Arc(512, 470 + dy, 40, 200, 140, 14)]
-    sparkles = [star(232, 196 + dy, 54), star(800, 230 + dy, 40)]
-    shine = [Capsule(338, 279 + dy, 410, 279 + dy, 9), Circle(438, 279 + dy, 9)]
-    glare = [Capsule(640, 334 + dy, 668, 362 + dy, 8)]
-    U, SR = 74, 11.6
-    base = 866
-    gap = 2 * SR + 0.2 * U
-    word = text_prims("make.fun", 510, base, U, SR, gap)
-    shadow = text_prims("make.fun", 514, base + 11, U, SR, gap)
-    OUT = 14
-    CUT = 38
-    SMOOTH = 80.0
-    reach = CUT + 8 + SMOOTH  # far enough that the blend has no seams
-    # the wordmark sits on a clean rounded nameplate rather than a bumpy
-    # offset of every letter; its top overlaps the chin so no pocket forms
-    tb = [p.bbox() for p in word + shadow]
-    plate = RBox(min(b[0] for b in tb) - 34, min(b[1] for b in tb) - 26,
-                 max(b[2] for b in tb) + 34, max(b[3] for b in tb) + 26, 46)
-    allf = Field.blend([
-        Field(head + ears + crown + crown_balls, reach),
-        Field([plate], reach),
-        Field(sparkles[:1], reach),
-        Field(sparkles[1:], reach),
-    ], SMOOTH).contour(CUT)
-    allf.paint(cv, INK, 6)
-    allf.paint(cv, WHITE, 0)
+    OUT = 18      # the one outline weight: art outlines and the die-cut keyline
+    WHITE_W = 26  # visible white die-cut margin
+    CUT = OUT + WHITE_W
+    EDGE = 76     # fills stay this far inside the canvas (die-cut + keyline + air)
 
-    for prims, col in ((sparkles, GOLD), (ears, VIOLET), (crown, GOLD), (crown_balls, GOLD), (head, VIOLET)):
+    # wordmark: sized to fill the badge, which spans the usable width
+    BADGE_PX, BADGE_PY = 24, 20
+    k_r, k_gap = 0.165, 0.13  # stroke half-width and letter air, in x-heights
+    probe = text_prims("make.fun", 0, 0, 100.0, 16.5, 100.0 * (2 * k_r + k_gap))
+    pw = max(p.bbox()[2] for p in probe) - min(p.bbox()[0] for p in probe)
+    U = (W - 2 * EDGE - 2 * BADGE_PX) / pw * 100.0
+    SR = k_r * U
+    badge_bot = H - EDGE
+    base = badge_bot - BADGE_PY - SR
+    word = text_prims("make.fun", W / 2, base, U, SR, U * (2 * k_r + k_gap))
+    tb = [p.bbox() for p in word]
+    plate = RBox(EDGE, min(b[1] for b in tb) - BADGE_PY, W - EDGE, badge_bot, 52)
+
+    # the champion: a big head, a big crown with a 1 on it, a cheeky wink
+    hx0, hx1 = 214, 810
+    hy1 = plate.box[1] - OUT - 16
+    hy0 = hy1 - 380
+    cx = (hx0 + hx1) / 2
+    head = [RBox(hx0, hy0, hx1, hy1, 110)]
+    ear_y0, ear_y1 = hy0 + 110, hy0 + 270
+    ears = [RBox(hx0 - 44, ear_y0, hx0 + 30, ear_y1, 28), RBox(hx1 - 30, ear_y0, hx1 + 44, ear_y1, 28)]
+    cb = hy0 + 30            # crown base (tucked under the head)
+    ctip = EDGE + 40         # centre ball centre
+    cw = 190                 # crown half width
+    crown = [Poly([(cx - cw, cb), (cx - cw, ctip + 70), (cx - 92, ctip + 128), (cx, ctip + 6),
+                   (cx + 92, ctip + 128), (cx + cw, ctip + 70), (cx + cw, cb)], 10)]
+    crown_balls = [Circle(cx - cw, ctip + 64, 30), Circle(cx, ctip, 36), Circle(cx + cw, ctip + 64, 30)]
+    one_top, one_bot = ctip + 84, hy0 - OUT - 24  # stays clear of the head's outline
+    one = [Capsule(cx + 10, one_top, cx + 10, one_bot, 17), Capsule(cx + 10, one_top, cx - 18, one_top + 24, 17)]
+    inset = 58
+    screen = [RBox(hx0 + inset, hy0 + inset, hx1 - inset, hy1 - inset, 74)]
+    ey = hy0 + 162
+    eyes = [Circle(cx - 112, ey, 40),                  # open eye
+            Arc(cx + 112, ey + 26, 50, 25, 130, 20)]   # closed, winking eye
+    mouth = [Arc(cx, ey + 40, 92, 215, 110, 20)]
+
+    # die-cut only: a straight flare from each ear down to the badge corners, so
+    # the cut is one calm bell shape with no deep notch under the ears
+    pb = plate.box
+    skirt = [Poly([(hx0 - 44, ear_y1 - 50), (hx1 + 44, ear_y1 - 50),
+                   (pb[2], pb[1] + 70), (pb[0], pb[1] + 70)])]
+    # a hard union is an exact distance field: keyline and white margin are
+    # true, even offsets of the art, with nothing to bulge or swell
+    allf = Field(head + ears + crown + crown_balls + skirt + [plate], CUT + OUT + 4)
+    allf.paint(cv, INK, CUT + OUT)
+    allf.paint(cv, WHITE, CUT)
+
+    for prims, col in ((ears, VIOLET), (crown, GOLD), (crown_balls, GOLD), (head, VIOLET)):
         f = Field(prims, OUT + 2)
         f.paint(cv, INK, OUT)
         f.paint(cv, col, 0)
     Field(one, 2).paint(cv, INK)
-    Field(shine, 2).paint(cv, VIOLET_LIGHT)
     Field(screen, 2).paint(cv, SCREEN)
-    Field(glare, 2).paint(cv, SCREEN_LIGHT)
     Field(eyes, 2).paint(cv, MINT)
     Field(mouth, 2).paint(cv, MINT)
-    # ink badge behind the wordmark; the die-cut keeps an even margin round it
+    # ink badge behind the white wordmark
     Field([plate], 2).paint(cv, INK)
-    Field(shadow, 2).paint(cv, CORAL)
     Field(word, 2).paint(cv, WHITE)
 
     write_png(os.path.join(out_dir, "entry.png"), cv)
